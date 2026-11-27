@@ -7,7 +7,8 @@
   const sb = window.supabase.createClient(cfg.url, cfg.key, { auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: true } });
   const TZ = "Europe/Zurich";
   const app = document.getElementById("app");
-  const st = { session: null, tab: safeGet("jarvis.tab") || "heute", data: null, owner: true, recovery: false, q: "" };
+  const st = { session: null, tab: safeGet("jarvis.tab") || "heute", more: null, data: null, owner: true, recovery: false, q: "" };
+  if (st.tab === "gedaechtnis" || st.tab === "meldungen") { st.more = st.tab; st.tab = "mehr"; } // gemerkter Tab aus Version 1
 
   function safeGet(k) { try { return localStorage.getItem(k); } catch { return null; } }
   function safeSet(k, v) { try { localStorage.setItem(k, v); } catch { /* egal */ } }
@@ -31,6 +32,8 @@
     kalender: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="3" y="5" width="18" height="16" rx="3"/><path d="M3 10h18M8 3v4M16 3v4"/></svg>',
     gedaechtnis: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M9 3a4 4 0 0 0-4 4v1a3 3 0 0 0 0 6v1a4 4 0 0 0 4 4h1V3H9ZM15 3a4 4 0 0 1 4 4v1a3 3 0 0 1 0 6v1a4 4 0 0 1-4 4h-1V3h1Z"/></svg>',
     meldungen: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M6 16V11a6 6 0 1 1 12 0v5l2 2H4l2-2ZM10 20a2 2 0 0 0 4 0"/></svg>',
+    chat: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M4 5h16v11H9l-5 4V5Z"/><path d="M8 10h8M8 13h5"/></svg>',
+    mehr: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="3" y="3" width="7" height="7" rx="2"/><rect x="14" y="3" width="7" height="7" rx="2"/><rect x="3" y="14" width="7" height="7" rx="2"/><rect x="14" y="14" width="7" height="7" rx="2"/></svg>',
     trash: '<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M4 7h16M10 11v6M14 11v6M6 7l1 13h10l1-13M9 7V4h6v3"/></svg>',
     tick: '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="3"><path d="m5 12 5 5 9-10"/></svg>',
   };
@@ -71,18 +74,20 @@
   // ── Daten ──
   async function load() {
     const now = Date.now();
-    const [tasks, events, memories, notes, pc] = await Promise.all([
+    const [tasks, events, memories, notes, pc, chat] = await Promise.all([
       sb.from("tasks").select("*").eq("deleted", false).order("status").order("priority").order("due_at", { nullsFirst: false }).limit(1000),
       sb.from("events").select("*").eq("deleted", false).gte("ends_at", new Date(now - 86400000).toISOString()).lte("starts_at", new Date(now + 60 * 86400000).toISOString()).order("starts_at").limit(500),
       sb.from("memories").select("*").eq("deleted", false).order("updated_at", { ascending: false }).limit(500),
       sb.from("notifications").select("*").eq("deleted", false).order("created_at", { ascending: false }).limit(100),
       sb.from("pc_status").select("*").maybeSingle(),
+      sb.from("chat").select("*").order("created_at", { ascending: false }).limit(60),
     ]);
-    const err = [tasks, events, memories, notes, pc].find((r) => r.error);
+    const err = [tasks, events, memories, notes, pc, chat].find((r) => r.error);
     if (err) throw err.error;
     st.owner = !!pc.data; // Zeile existiert immer – unsichtbar heisst: Konto nicht freigeschaltet
-    st.data = { tasks: tasks.data, events: events.data, memories: memories.data, notes: notes.data, pc: pc.data };
+    st.data = { tasks: tasks.data, events: events.data, memories: memories.data, notes: notes.data, pc: pc.data, chat: chat.data.reverse() };
   }
+  const pcOnline = () => !!(st.data && st.data.pc && st.data.pc.last_sync_at && Date.now() - new Date(st.data.pc.last_sync_at).getTime() < 120000);
   async function act(promise, ok) {
     const { error } = await promise;
     if (error) { toast(`Fehler: ${error.message}`); return; }
@@ -253,7 +258,89 @@
     return [h("div", { class: "card" }, h("h2", {}, "Meldungen", h("span", { class: "count" }, n.filter((x) => !x.read).length + " neu")), n.length ? noteList(n) : h("p", { class: "empty" }, "Keine Meldungen."))];
   }
 
-  const TABS = [["heute", "Heute", viewHeute], ["aufgaben", "Aufgaben", viewAufgaben], ["kalender", "Kalender", viewKalender], ["gedaechtnis", "Gedächtnis", viewGedaechtnis], ["meldungen", "Meldungen", viewMeldungen]];
+  // ── Chat: Frage landet in der Cloud, der PC-JARVIS beantwortet sie mit allen Werkzeugen (E-Mail, Recherche, Projekte …) ──
+  async function ask(text) {
+    const q = String(text || "").trim();
+    if (!q) return;
+    st.tab = "chat"; safeSet("jarvis.tab", "chat");
+    await act(sb.from("chat").insert({ question: q.slice(0, 4000) }));
+    window.scrollTo(0, document.body.scrollHeight);
+  }
+  const SUGGEST = ["Was steht heute an?", "Fasse meine neuen E-Mails zusammen", "Wie wird das Wetter morgen?", "Was gibt es Neues in der Schweiz?", "Wie viel KI-Budget habe ich noch?"];
+  function viewChat() {
+    const msgs = st.data.chat;
+    const online = pcOnline();
+    const f = h("form", { class: "add chatbox", onsubmit: (e) => {
+      e.preventDefault();
+      const inp = e.target.elements.q;
+      const v = inp.value;
+      inp.value = "";
+      void ask(v);
+    } },
+      h("div", { class: "row" },
+        h("input", { name: "q", placeholder: online ? "Frag JARVIS …" : "Frag JARVIS – Antwort kommt, sobald der PC läuft", maxlength: "4000", autocomplete: "off", "aria-label": "Nachricht an JARVIS" }),
+        h("button", { class: "btn", type: "submit" }, "Senden")));
+    return [
+      h("div", { class: "card" },
+        h("h2", {}, "Chat mit JARVIS", msgs.length ? h("button", { class: "linkbtn", onclick: () => confirm("Ganzen Chatverlauf in der Cloud löschen? (Auf dem PC bleibt das Gespräch erhalten.)") && act(sb.from("chat").delete().not("id", "is", null), "Verlauf gelöscht") }, "Verlauf löschen") : null),
+        h("p", { class: "hint" }, online
+          ? "Dein PC ist an: JARVIS antwortet mit allen Fähigkeiten – E-Mails, Recherche, Projekte, Kontakte, Dateien, Automationen."
+          : "Dein PC ist aus: Die Nachricht wird gespeichert und automatisch beantwortet, sobald der PC läuft."),
+        msgs.length ? h("div", { class: "chat" }, msgs.map((m) => [
+          h("div", { class: "bubble me" }, m.question, h("div", { class: "when" }, ago(m.created_at))),
+          m.status === "answered" || m.status === "failed"
+            ? h("div", { class: `bubble jarvis ${m.status === "failed" ? "fail" : ""}` }, m.answer, h("div", { class: "when" }, ago(m.answered_at), m.model ? ` · ${m.model}` : "", m.cost_chf ? ` · ${Number(m.cost_chf).toFixed(3)} CHF` : ""))
+            : h("div", { class: "bubble jarvis wait" }, m.status === "working" ? "JARVIS denkt nach …" : online ? "Wird gleich abgeholt …" : "⟳ wartet auf PC"),
+        ])) : h("div", { class: "suggest" }, SUGGEST.map((s) => h("button", { class: "chipbtn", onclick: () => ask(s) }, s))),
+        f),
+    ];
+  }
+
+  // ── Mehr: alle Bereiche des vollen JARVIS ──
+  const AREAS = [
+    ["Mein Tag", [["☀", "Tagesplan", "heute"], ["▦", "Kalender", "kalender"], ["☐", "Aufgaben", "aufgaben"], ["✎", "Erinnerungen & Notizen", "aufgaben"], ["◔", "Meldungen", "meldungen"], ["✈", "Reisen & ÖV", null, "Wie komme ich mit dem ÖV von Basel nach Zürich?", "/travel"]]],
+    ["Kommunikation", [["✉", "E-Mail", null, "Fasse meine neuen E-Mails zusammen", "/mail"], ["☺", "Kontakte", null, "Suche in meinen Kontakten nach …", "/contacts"], ["☏", "Telefon", null, "Wer hat mich zuletzt angerufen?", "/phone"]]],
+    ["Schule & Wissen", [["✎", "School Mode", null, "Erkläre mir …", "/school"], ["▥", "Dokumente", null, "Suche in meinen Dokumenten nach …", "/documents"], ["⌕", "Recherche", null, "Recherchiere: …", "/research"], ["▤", "Dateien & Fotos", null, "Finde die Datei …", "/files"], ["◈", "Gedächtnis", "gedaechtnis"]]],
+    ["Creator & Business", [["▶", "Creator Studio", null, "Gib mir 3 Ideen für ein neues Video", "/creator"], ["⬡", "Projekte", null, "Wie stehen meine Projekte?", "/projects"], ["◆", "Business", null, "Was ist im Business offen?", "/business"], ["¤", "Finanzen", null, "Wie viel KI-Budget habe ich diesen Monat noch?", "/finance"]]],
+    ["KI & Automation", [["⚡", "Automationen", null, "Welche Automationen laufen?", "/automations"], ["⟁", "Agenten", null, null, "/agents"], ["✦", "Skills", null, null, "/skills"], ["⟳", "Evolution", null, null, "/evolution"]]],
+    ["System", [["◉", "Command Center", null, null, "/"], ["◖", "Voice Center", null, null, "/voice"], ["⧉", "Konten verbinden", null, null, "/accounts"], ["∿", "Monitoring", null, "Wie geht es dem PC?", "/monitoring"], ["⛨", "Sicherheit", null, null, "/security"], ["⟲", "Backups", null, null, "/backups"], ["⚙", "Einstellungen", null, null, "/settings"]]],
+  ];
+  function viewMehr() {
+    if (st.more === "gedaechtnis") return [backBtn(), ...viewGedaechtnis()];
+    if (st.more === "meldungen") return [backBtn(), ...viewMeldungen()];
+    const dash = st.data.pc && st.data.pc.dashboard_url;
+    const online = pcOnline();
+    const unread = st.data.notes.filter((n) => !n.read).length;
+    const go = (target) => {
+      if (target === "gedaechtnis" || target === "meldungen") st.more = target;
+      else { st.tab = target; safeSet("jarvis.tab", target); }
+      render(); window.scrollTo(0, 0);
+    };
+    return [
+      h("div", { class: "card" },
+        h("h2", {}, "Volles JARVIS"),
+        h("p", { class: "hint" }, online
+          ? "Dein PC ist an. Alles fragst du am einfachsten im Chat – oder du öffnest das volle Dashboard (nur mit Tailscale auf dem Handy)."
+          : "Dein PC ist aus. Hier in der Cloud gehen Aufgaben, Kalender, Gedächtnis und Meldungen. Chat-Fragen werden beantwortet, sobald der PC läuft."),
+        dash ? h("a", { class: "btn wide", href: dash, target: "_blank", rel: "noopener" }, "Dashboard öffnen ↗") : h("p", { class: "hint" }, "Dashboard-Adresse kommt beim nächsten Abgleich vom PC.")),
+      AREAS.map(([group, items]) => h("div", { class: "card" }, h("h2", {}, group),
+        h("ul", { class: "list areas" }, items.map(([ic, label, local, prompt, path]) => h("li", {},
+          h("span", { class: "aicon", "aria-hidden": "true" }, ic),
+          h("div", { class: "grow" },
+            h("div", { class: "title" }, label, local === "meldungen" && unread ? h("span", { class: "n inline" }, unread) : null),
+            h("div", { class: "meta" }, local ? "in der Cloud – auch bei PC aus" : prompt ? "über den Chat (PC an)" : "im vollen Dashboard (PC an)")),
+          local ? h("button", { class: "btn sm", onclick: () => go(local) }, "Öffnen")
+            : h("span", { class: "acts" },
+              prompt ? h("button", { class: "btn sm", onclick: () => { st.tab = "chat"; safeSet("jarvis.tab", "chat"); render(); const i = document.querySelector(".chatbox input"); if (i) { i.value = prompt.replace(/…$/, ""); i.focus(); } } }, "Fragen") : null,
+              dash ? h("a", { class: "btn ghost sm", href: dash + path, target: "_blank", rel: "noopener", "aria-label": `${label} im Dashboard öffnen` }, "↗") : null)))))),
+      h("div", { class: "card" }, h("h2", {}, "Konto"),
+        h("p", { class: "hint" }, "Angemeldet als ", st.session && st.session.user ? st.session.user.email : ""),
+        h("button", { class: "btn ghost wide", onclick: async () => { await sb.auth.signOut(); } }, "Abmelden")),
+    ];
+  }
+  const backBtn = () => h("button", { class: "linkbtn back", onclick: () => { st.more = null; render(); window.scrollTo(0, 0); } }, "‹ Alle Bereiche");
+
+  const TABS = [["heute", "Heute", viewHeute], ["chat", "Chat", viewChat], ["aufgaben", "Aufgaben", viewAufgaben], ["kalender", "Kalender", viewKalender], ["mehr", "Mehr", viewMehr]];
 
   function viewMain() {
     const tab = TABS.find((t) => t[0] === st.tab) || TABS[0];
@@ -262,13 +349,12 @@
       h("header", { class: "top" },
         h("div", { class: "orb sm", "aria-hidden": "true" }),
         h("div", {}, h("h1", {}, "J.A.R.V.I.S."), h("div", { class: "sub" }, "Cloud")),
-        h("span", { class: "spacer" }), pcChip(),
-        h("button", { class: "btn ghost sm", onclick: async () => { await sb.auth.signOut(); } }, "Abmelden")),
+        h("span", { class: "spacer" }), pcChip()),
       st.owner ? (st.data ? tab[2]() : h("p", { class: "empty" }, "Lade …"))
         : h("div", { class: "card" }, h("h2", {}, "Kein Zugriff"), h("p", { class: "hint" }, "Dieses Konto ist nicht als Besitzer freigeschaltet oder die E-Mail-Adresse ist noch nicht bestätigt. Bitte den Bestätigungslink in der E-Mail öffnen und neu anmelden.")),
       h("nav", { class: "tabs", "aria-label": "Bereiche" }, h("div", { class: "inner" }, TABS.map(([id, label]) =>
-        h("button", { "aria-current": st.tab === id ? "page" : null, onclick: () => { st.tab = id; safeSet("jarvis.tab", id); render(); window.scrollTo(0, 0); } },
-          icon(id), label, id === "meldungen" && unread ? h("span", { class: "n" }, unread) : null)))),
+        h("button", { "aria-current": st.tab === id ? "page" : null, onclick: () => { st.tab = id; st.more = null; safeSet("jarvis.tab", id); render(); window.scrollTo(0, id === "chat" ? document.body.scrollHeight : 0); } },
+          icon(id), label, id === "mehr" && unread ? h("span", { class: "n" }, unread) : null)))),
     ];
   }
 
@@ -327,6 +413,15 @@
     setTimeout(() => void refresh(), 0);
   });
   sb.auth.getSession().then(({ data }) => { st.session = data.session; void refresh(); });
-  setInterval(() => { if (document.visibilityState === "visible" && st.session) void refresh(); }, 30000);
+  // alle 30 s neu laden – solange eine Chat-Antwort aussteht, alle 3 s (ohne Eingaben im Formular zu verlieren)
+  let tick = 0;
+  setInterval(() => {
+    if (document.visibilityState !== "visible" || !st.session) return;
+    tick++;
+    const waiting = st.data && st.data.chat.some((m) => m.status === "pending" || m.status === "working") && pcOnline();
+    const typing = document.activeElement && /INPUT|TEXTAREA|SELECT/.test(document.activeElement.tagName) && document.activeElement.value;
+    if (typing) return;
+    if ((waiting && st.tab === "chat") || tick % 10 === 0) void refresh().then(() => { if (st.tab === "chat") window.scrollTo(0, document.body.scrollHeight); });
+  }, 3000);
   document.addEventListener("visibilitychange", () => { if (document.visibilityState === "visible" && st.session) void refresh(); });
 })();

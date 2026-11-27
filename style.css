@@ -111,5 +111,31 @@ nav.tabs button svg { width: 22px; height: 22px; }
 nav.tabs button[aria-current="page"] { color: var(--cyan); background: var(--cyan-soft); }
 nav.tabs .n { position: absolute; top: 2px; right: 22%; background: var(--cyan); color: #022c33; border-radius: 999px; font-size: 10px; padding: 0 5px; font-weight: 700; }
 
+/* Chat */
+.chat { display: flex; flex-direction: column; gap: 8px; margin: 12px 0; }
+.bubble { max-width: 86%; padding: 9px 12px; border-radius: 14px; white-space: pre-wrap; overflow-wrap: anywhere; font-size: 14px; }
+.bubble.me { align-self: flex-end; background: var(--cyan-soft); border: 1px solid rgba(34, 211, 238, 0.35); border-bottom-right-radius: 4px; }
+.bubble.jarvis { align-self: flex-start; background: var(--panel-2); border: 1px solid var(--line); border-bottom-left-radius: 4px; }
+.bubble.wait { color: var(--warn); font-size: 13px; }
+.bubble.fail { color: #fecaca; border-color: rgba(248, 113, 113, 0.4); }
+.bubble .when { color: var(--dim); font-size: 11px; margin-top: 4px; white-space: normal; }
+.chatbox { margin: 8px 0 0; }
+form.add.chatbox .row { flex-wrap: nowrap; }
+form.add.chatbox .row > input { flex: 1 1 0; width: auto; }
+form.add.chatbox .row > .btn { flex: 0 0 auto; }
+.suggest { display: flex; flex-wrap: wrap; gap: 8px; margin: 12px 0; }
+.chipbtn { border: 1px solid var(--line); background: var(--panel-2); border-radius: 999px; padding: 7px 12px; font-size: 13px; cursor: pointer; color: var(--text); }
+.chipbtn:hover { border-color: rgba(34, 211, 238, 0.5); }
+.linkbtn { background: none; border: 0; color: var(--cyan); cursor: pointer; font-size: 12px; padding: 2px 0; text-transform: none; letter-spacing: 0; margin-left: auto; }
+.linkbtn.back { display: block; margin: 0 0 10px; font-size: 14px; }
+
+/* Mehr */
+ul.areas li { align-items: center; }
+.aicon { width: 32px; height: 32px; border-radius: 10px; background: var(--panel-2); display: grid; place-items: center; color: var(--cyan); flex: none; font-size: 15px; }
+.acts { display: flex; gap: 6px; flex: none; }
+a.btn { text-decoration: none; display: inline-block; text-align: center; }
+.btn.wide { display: block; margin-top: 12px; }
+.n.inline { background: var(--cyan); color: #022c33; border-radius: 999px; font-size: 10px; padding: 0 6px; font-weight: 700; margin-left: 6px; vertical-align: 2px; }
+
 .toast { position: fixed; left: 50%; bottom: calc(86px + env(safe-area-inset-bottom)); transform: translateX(-50%); background: #0b1220; border: 1px solid var(--line); border-radius: 12px; padding: 10px 14px; font-size: 13px; z-index: 20; max-width: calc(100% - 32px); box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5); }
 .sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
