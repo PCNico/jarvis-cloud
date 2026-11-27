@@ -22,7 +22,7 @@
       else if (k === "html") el.innerHTML = v; // nur für feste SVG-Symbole unten
       else el.setAttribute(k, v === true ? "" : v);
     }
-    for (const c of kids.flat()) if (c != null && c !== false) el.append(c instanceof Node ? c : document.createTextNode(String(c)));
+    for (const c of kids.flat(Infinity)) if (c != null && c !== false) el.append(c instanceof Node ? c : document.createTextNode(String(c)));
     return el;
   }
   const ICON = {
@@ -107,7 +107,7 @@
 
   function viewHeute() {
     const d = st.data;
-    const hour = +fmt(new Date(), { hour: "2-digit", hourCycle: "h23" });
+    const hour = parseInt(fmt(new Date(), { hour: "numeric", hourCycle: "h23" }), 10); // de-CH liefert „8 Uhr“
     const greet = hour < 11 ? "Guten Morgen" : hour < 18 ? "Guten Tag" : "Guten Abend";
     const open = d.tasks.filter((t) => t.status !== "done");
     const today = d.events.filter((e) => dayKey(e.starts_at) === todayKey() || (new Date(e.starts_at) < new Date() && new Date(e.ends_at) > new Date()));
@@ -263,7 +263,7 @@
         h("div", { class: "orb sm", "aria-hidden": "true" }),
         h("div", {}, h("h1", {}, "J.A.R.V.I.S."), h("div", { class: "sub" }, "Cloud")),
         h("span", { class: "spacer" }), pcChip(),
-        h("button", { class: "btn ghost", style: null, onclick: async () => { await sb.auth.signOut(); } }, "Abmelden")),
+        h("button", { class: "btn ghost sm", onclick: async () => { await sb.auth.signOut(); } }, "Abmelden")),
       st.owner ? (st.data ? tab[2]() : h("p", { class: "empty" }, "Lade …"))
         : h("div", { class: "card" }, h("h2", {}, "Kein Zugriff"), h("p", { class: "hint" }, "Dieses Konto ist nicht als Besitzer freigeschaltet oder die E-Mail-Adresse ist noch nicht bestätigt. Bitte den Bestätigungslink in der E-Mail öffnen und neu anmelden.")),
       h("nav", { class: "tabs", "aria-label": "Bereiche" }, h("div", { class: "inner" }, TABS.map(([id, label]) =>
@@ -316,7 +316,7 @@
   }
 
   function render(msg) {
-    app.replaceChildren(...[st.session && !st.recovery ? viewMain() : viewAuth(msg)].flat().filter(Boolean));
+    app.replaceChildren(...[st.session && !st.recovery ? viewMain() : viewAuth(msg)].flat(Infinity).filter(Boolean));
   }
 
   // ── Start ──
